@@ -13,6 +13,7 @@ one per step, each closed by a pull request.
 ```
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
+k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
 
 ## The app
@@ -45,7 +46,66 @@ page load:  browser ─► frontend (server component) ────────�
 button:     browser ─► frontend /api/* (route handler proxy) ───► backend Service
 ```
 
+## Prerequisites
+
+- Docker and k3d.
+
+## The k3d cluster
+
+[k3d](https://k3d.io) runs [k3s](https://k3s.io), a lightweight Kubernetes, as Docker
+containers. Everything is in [`k3d/k3d-config.yaml`](k3d/k3d-config.yaml): cluster name,
+node count, pinned k3s version (v1.31.1), ports and the image registry.
+
+### Containers
+
+| Container | What it does |
+|---|---|
+| `k3d-devspace-sandbox-server-0` | Control plane (API server, scheduler, etcd/SQLite). Also runs pods. |
+| `k3d-devspace-sandbox-agent-0` | Worker node, runs pods. |
+| `k3d-devspace-sandbox-serverlb` | Load balancer, the cluster's front door: `127.0.0.1:6444` → Kubernetes API, `:8081` → ingress (HTTP). |
+| `devspace-sandbox-registry.localhost` | Image registry, `127.0.0.1:5111` on the host → `5000` in the container. |
+
+### Images
+
+1. DevSpace builds with the host's Docker and pushes to `localhost:5111`.
+2. The nodes pull `localhost:5111/...` too. Inside a node, `localhost` is the node itself,
+   so the `registries.config` block in the k3d config adds a k3s mirror that maps
+   `localhost:5111` to the registry container (`devspace-sandbox-registry.localhost:5000`).
+
+The registry name, port and mirror are set explicitly. k3d's defaults (generated name,
+random host port) don't suit a config that needs a fixed image address.
+
+### kubectl
+
+`k3d cluster create` adds the context `k3d-devspace-sandbox` to `~/.kube/config` and makes
+it the current context, pointing at `https://127.0.0.1:6444`. So kubectl works right away:
+
+```sh
+kubectl get nodes
+kubectl get pods,svc,ingress
+```
+
+Pause and resume without losing state: `k3d cluster stop devspace-sandbox` /
+`k3d cluster start devspace-sandbox`.
+
+## Run it
+
+```sh
+k3d cluster create -c k3d/k3d-config.yaml          # cluster + registry on localhost:5111
+```
+
+## Stop / clean up
+
+```sh
+k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
+```
+
 ## Notes and gotchas
 
+- **Non-default ports** (API `6444`, HTTP `8081`) to avoid clashing with other local
+  clusters on the usual `6443` / `8080`.
+- **Registry is pushed to as `localhost:5111`.** The host Docker daemon doesn't use
+  systemd-resolved, so it can't resolve `*.localhost` registry names. k3s gets a mirror
+  entry mapping `localhost:5111` to the registry container instead (see `k3d/k3d-config.yaml`).
 - **The visit counter is in memory** on purpose: it resets on every hot reload, so you can
   see reloads happen. A real app would keep it in a backing service (Redis, Postgres).

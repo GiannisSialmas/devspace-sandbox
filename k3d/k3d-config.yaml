@@ -1,0 +1,27 @@
+# Reference: https://k3d.io/stable/usage/configfile/#config-options
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: devspace-sandbox
+servers: 1
+agents: 1 # one is plenty for a two-service app
+image: docker.io/rancher/k3s:v1.31.1-k3s1 # pinned for reproducibility
+kubeAPI:
+  hostIP: "127.0.0.1"
+  hostPort: "6444" # not the default 6443, to avoid clashing with other local clusters
+ports:
+  - port: 8081:80 # not 8080, for the same reason
+    nodeFilters:
+      - loadbalancer
+registries:
+  create: # local registry DevSpace pushes images to; pods pull from it inside the cluster
+    name: devspace-sandbox-registry.localhost
+    host: "127.0.0.1"
+    hostPort: "5111"
+  # The host Docker daemon can't resolve *.localhost (it skips systemd-resolved), so images are
+  # pushed to localhost:5111 and k3s maps that name to the registry container inside the cluster.
+  config: |
+    mirrors:
+      "localhost:5111":
+        endpoint:
+          - http://devspace-sandbox-registry.localhost:5000
