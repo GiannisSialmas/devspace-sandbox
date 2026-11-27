@@ -43,7 +43,7 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Vars, images, deployments, dev containers
+devspace.yaml   Vars, images, deployments, dev containers, hooks
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
 
@@ -203,6 +203,7 @@ value from your environment first and only asks if it isn't set, so
 | `FRONTEND_LOCAL_PORT` | `source: env` + `default` | Local port of the frontend port-forward (default `3001`). Never asked: `FRONTEND_LOCAL_PORT=3005 devspace dev` |
 | `BACKEND_LOCAL_PORT` | `source: env` + `default` | Same for the backend (`4000`) |
 | `APP_HOST` | `source: env` + `default` | Ingress host (default `app.devspace.test`); also fed to `ALLOWED_DEV_ORIGINS` |
+| `APP_URL` | static value, built from a var | `http://${APP_HOST}:8081`, used by the hooks |
 
 ```sh
 devspace list vars        # current values (cached answers included)
@@ -215,6 +216,47 @@ devspace reset vars       # forget cached answers, so questions are asked again
   or `--var NAME=value`.
 - The vars are only wired into the dev containers (`dev.backend.env`). `k8s/` keeps static
   values, so `devspace deploy` uses those.
+
+## Hooks
+
+Scripts under `hooks:` in `devspace.yaml` that DevSpace runs on events in its normal flow. No
+`container:` means the hook runs locally; with one, it runs inside a pod.
+
+| Hook | Event | What it does |
+|---|---|---|
+| `preflight-registry` | `before:build` | Stops early with a clear message if the registry on `localhost:5111` is down |
+| `failure-hint` | `error:build:*`, `error:deploy:*` | Prints a hint when a build or deploy fails |
+| `backend-smoke-test` | `after:initialSync:backend` | Runs inside the backend pod and waits until `/api/health` answers |
+| `ready-banner` | `after:initialSync:frontend` | Prints `Ready: http://app.devspace.test:8081` |
+
+### Events
+
+- `before:` / `after:` / `error:` + `build`, `deploy`, `purge`, `initialSync`,
+  `createPullSecrets`, `loadConfig`, and the `…Dependencies` variants.
+- `start:` / `stop:` / `restart:` / `error:` + `sync`, `portForwarding`,
+  `reversePortForwarding`.
+- `devCommand:before:sync`, `devCommand:after:sync`, and the same for `portForwarding`.
+- `skip:build:<image>`, when an image is unchanged and not rebuilt.
+- Events about one image, deployment or dev container always end in `:<name>` or `:*`:
+  `after:deploy:app`, `error:build:*`, `after:initialSync:backend`. **Plain `error:build` never
+  fires.** `before:build` and `after:build` also exist once for the whole build step, which is
+  what `preflight-registry` uses.
+
+### Other hook options (not used here)
+
+| Option | What it does |
+|---|---|
+| `upload` / `download` | Copy local files into a container, or out of it, instead of running a command |
+| `wait` | Wait until the matched pod is running, or has exited with a given code |
+| `logs` | Print the container's logs. Meant for containers that finish, like jobs or init containers |
+| `background` | Don't wait for the hook to finish |
+| `silent` | Hide the hook's output. In v6.3.21 this also hides it when the hook fails, so the reason is lost (only `exit status 1` remains). That's why `preflight-registry` silences `curl` itself |
+| `os` | Only run on some operating systems, e.g. `os: linux,darwin` |
+| `args` | Run `command` with these arguments directly, without a shell |
+| `disabled` | Turn a hook off without deleting it |
+| `container.once` | Run only once per container start |
+| `container.pod`, `imageSelector`, `containerName`, `namespace` | Other ways to pick the container |
+| `container.timeout` / `container.wait` | How long to wait for the container (default 150 s), or don't wait at all |
 
 ## Stop / clean up
 
