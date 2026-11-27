@@ -10,6 +10,7 @@ vars:
   GREETING: # question: asked once, then cached
     question: What should the backend say?
     default: Hello from the backend, deployed by DevSpace
+    alwaysResolve: false # don't ask on `devspace run <cmd>`, which doesn't use it
 
   APP_VERSION: # command: resolved on every run
     command: git rev-parse --short HEAD
@@ -25,7 +26,15 @@ vars:
     source: env
     default: app.devspace.test
 
-  APP_URL: http://${APP_HOST}:8081 # used by the hooks
+  HOSTS_ENTRY: # command var, used by `devspace run doctor`
+    command: grep -v '^[[:space:]]*#' /etc/hosts | grep -qwF "${APP_HOST}" && echo present || echo missing
+
+  APP_URL: http://${APP_HOST}:8081 # used by hooks and commands
+
+# alwaysResolve: DevSpace 6.3.21 resolves every var on every run (unset counts as true, despite
+# the docs saying false). `alwaysResolve: false` limits a var to runs that reference it.
+# `devspace run <cmd>` only loads commands:, so GREETING's question stays out of it. dev, deploy,
+# build and purge load the whole file, so they resolve every var used anywhere in it.
 
 # Push to the k3d registry instead of DevSpace's own in-cluster registry.
 localRegistry:
@@ -117,12 +126,12 @@ dev:
 hooks:
   - name: preflight-registry # fail fast with a clear message instead of a push error
     events: ["before:build"]
-    command: 'curl -fs http://localhost:5111/v2/ >/dev/null 2>&1 || { echo "registry on localhost:5111 is down (is the k3d cluster running?)"; exit 1; }'
+    command: 'curl -fs http://localhost:5111/v2/ >/dev/null 2>&1 || { echo "registry on localhost:5111 is down (try: devspace run doctor)"; exit 1; }'
     # not `silent: true`: in v6.3.21 that also hides the output when the hook fails
 
   - name: failure-hint
     events: ["error:build:*", "error:deploy:*"] # per-image/deployment events need :<name> or :*
-    command: 'echo "Something failed. Is the k3d cluster running? (k3d cluster list)"'
+    command: 'echo "Something failed. Try: devspace run doctor"'
 
   - name: backend-smoke-test # runs inside the backend pod; DevSpace waits for the container first
     events: ["after:initialSync:backend"]
@@ -135,3 +144,40 @@ hooks:
   - name: ready-banner
     events: ["after:initialSync:frontend"]
     command: 'echo "Ready: ${APP_URL}"'
+
+# commands: shortcuts run with `devspace run <name>`, like `scripts` in package.json. Plain
+# shell with vars filled in; to build or deploy they'd have to call `devspace` themselves.
+commands:
+  open:
+    description: Print the app URL
+    command: echo "${APP_URL}"
+
+  doctor:
+    section: Troubleshooting
+    description: Check the /etc/hosts entry, the k3d cluster and the image registry
+    command: ./scripts/doctor.sh "${HOSTS_ENTRY}" "${APP_HOST}"
+
+  logs:
+    section: Debugging
+    description: "Follow a service's logs. Usage: devspace run logs backend|frontend"
+    command: | # $1, not ${1}: DevSpace reads ${...} as one of its own vars
+      [ -n "$1" ] || { echo "usage: devspace run logs backend|frontend"; exit 1; }
+      devspace logs --follow --label-selector "app=$1"
+
+  shell:
+    section: Debugging
+    description: "Open a shell in a service's pod. Usage: devspace run shell backend|frontend"
+    command: | # $1, not ${1}: DevSpace reads ${...} as one of its own vars
+      [ -n "$1" ] || { echo "usage: devspace run shell backend|frontend"; exit 1; }
+      devspace enter --label-selector "app=$1"
+
+  set-admin-token:
+    section: Admin
+    description: Set the admin password for reset-visits (backend-admin Secret) and restart the backend; empty removes it
+    command: ./scripts/set-admin-token.sh ${DEVSPACE_NAMESPACE}
+
+  reset-visits:
+    section: Admin
+    description: Reset the visit counter; asks for the admin password only if one is set
+    command: ./scripts/reset-visits.sh ${DEVSPACE_NAMESPACE} ${APP_URL}
+    after: '[ -n "$COMMAND_ERROR" ] && echo "reset failed: wrong admin password, or the app is unreachable (try: devspace run doctor)" || true'

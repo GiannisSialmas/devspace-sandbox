@@ -21,6 +21,9 @@ spec:
               value: "4000"
             - name: GREETING
               value: "Hello from the backend, deployed by DevSpace"
+            - name: ADMIN_TOKEN # set with `devspace run set-admin-token`; no Secret = no password needed
+              valueFrom:
+                secretKeyRef: { name: backend-admin, key: token, optional: true }
           readinessProbe:
             httpGet: { path: /api/health, port: 4000 }
 ---
