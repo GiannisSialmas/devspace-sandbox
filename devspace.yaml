@@ -15,7 +15,8 @@ vars:
   APP_VERSION: # command: resolved on every run
     command: git rev-parse --short HEAD
 
-  # env only: `FRONTEND_LOCAL_PORT=3005 devspace dev`, else the default.
+  # env only: `FRONTEND_LOCAL_PORT=3005 devspace dev`, else the default. A worktree running its
+  # own copy sets these to free ports, and APP_HOST to its own host (see the README).
   FRONTEND_LOCAL_PORT:
     source: env
     default: "3001"
