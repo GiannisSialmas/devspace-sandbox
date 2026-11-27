@@ -43,7 +43,7 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Images, deployments, dev containers
+devspace.yaml   Vars, images, deployments, dev containers
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
 
@@ -137,7 +137,7 @@ node count, pinned k3s version (v1.31.1), ports and the image registry.
 ### Ingress
 
 k3s ships [Traefik](https://traefik.io) as its ingress controller. The Ingress (the `ingress`
-deployment in `devspace.yaml`) sends everything on the host `app.devspace.test`
+deployment in `devspace.yaml`) sends everything on the host `app.devspace.test` (`APP_HOST`)
 to the frontend. The backend has no
 ingress rule, so it isn't exposed outside the cluster (apart from the DevSpace port-forward).
 
@@ -188,6 +188,33 @@ Then open:
 
 Edit anything in `frontend/app/` or `backend/server.js` and it reloads in the cluster within a
 second or two.
+
+## Variables
+
+`devspace.yaml` uses one variable of each kind. By default (`source: all`) DevSpace takes a
+value from your environment first and only asks if it isn't set, so
+`GREETING=hi devspace dev` skips the question.
+
+| Var | Kind | What it does |
+|---|---|---|
+| `REGISTRY` | static value | Registry prefix of the image names |
+| `GREETING` | `question` + `default` | Backend greeting in dev mode. Asked once, then cached |
+| `APP_VERSION` | `command` | `git rev-parse --short HEAD`, run every time, shown on the page |
+| `FRONTEND_LOCAL_PORT` | `source: env` + `default` | Local port of the frontend port-forward (default `3001`). Never asked: `FRONTEND_LOCAL_PORT=3005 devspace dev` |
+| `BACKEND_LOCAL_PORT` | `source: env` + `default` | Same for the backend (`4000`) |
+| `APP_HOST` | `source: env` + `default` | Ingress host (default `app.devspace.test`); also fed to `ALLOWED_DEV_ORIGINS` |
+
+```sh
+devspace list vars        # current values (cached answers included)
+devspace reset vars       # forget cached answers, so questions are asked again
+```
+
+- **Cache:** question answers are stored encrypted in `.devspace/cache.yaml` (gitignored).
+  `noCache` vars are never stored.
+- **Non-interactive runs** (CI, scripts) can't answer questions: pass every value as an env var
+  or `--var NAME=value`.
+- The vars are only wired into the dev containers (`dev.backend.env`). `k8s/` keeps static
+  values, so `devspace deploy` uses those.
 
 ## Stop / clean up
 

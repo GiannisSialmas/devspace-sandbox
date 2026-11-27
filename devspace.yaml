@@ -2,6 +2,29 @@
 version: v2beta1
 name: devspace-sandbox
 
+# Values come from the env first, then a question (source: all, the default), unless noted.
+# Answers are cached (encrypted) in .devspace/cache.yaml; `devspace reset vars` clears them.
+vars:
+  REGISTRY: localhost:5111 # static value
+
+  GREETING: # question: asked once, then cached
+    question: What should the backend say?
+    default: Hello from the backend, deployed by DevSpace
+
+  APP_VERSION: # command: resolved on every run
+    command: git rev-parse --short HEAD
+
+  # env only: `FRONTEND_LOCAL_PORT=3005 devspace dev`, else the default.
+  FRONTEND_LOCAL_PORT:
+    source: env
+    default: "3001"
+  BACKEND_LOCAL_PORT:
+    source: env
+    default: "4000"
+  APP_HOST: # the Ingress host; needs a line in /etc/hosts
+    source: env
+    default: app.devspace.test
+
 # Push to the k3d registry instead of DevSpace's own in-cluster registry.
 localRegistry:
   enabled: false
@@ -9,15 +32,15 @@ localRegistry:
 # `devspace build` / the first step of `devspace deploy` and `devspace dev`
 images:
   backend:
-    image: localhost:5111/backend
+    image: ${REGISTRY}/backend
     context: ./backend
     dockerfile: ./backend/Dockerfile
   frontend:
-    image: localhost:5111/frontend
+    image: ${REGISTRY}/frontend
     context: ./frontend
     dockerfile: ./frontend/Dockerfile
   frontend-dev: # same Dockerfile, stopped at the `dev` stage (node_modules + next dev)
-    image: localhost:5111/frontend-dev
+    image: ${REGISTRY}/frontend-dev
     context: ./frontend
     dockerfile: ./frontend/Dockerfile
     target: dev
@@ -28,7 +51,7 @@ deployments:
     kubectl:
       manifests:
         - k8s/
-  ingress: # the Ingress, written inline
+  ingress: # inline, so ${APP_HOST} gets filled in (DevSpace doesn't touch vars in k8s/ files)
     kubectl:
       inlineManifest: |-
         # Traefik (bundled with k3s) serves this on the k3d load balancer, port 8081.
@@ -39,7 +62,7 @@ deployments:
           name: app
         spec:
           rules:
-            - host: app.devspace.test
+            - host: ${APP_HOST}
               http:
                 paths:
                   - path: /
@@ -56,13 +79,17 @@ dev:
     env:
       - name: NODE_ENV # the image sets production
         value: development
+      - name: GREETING
+        value: ${GREETING}
+      - name: APP_VERSION
+        value: ${APP_VERSION}
     sync:
       - path: ./backend:/app
         excludePaths: [node_modules/] # the image provides it
         # no startContainer: the image already has the code, and as the non-root `node` user
         # DevSpace's restart helper can't write its start file in the root-owned /.devspace
     ports:
-      - port: "4000"
+      - port: "${BACKEND_LOCAL_PORT}:4000"
     logs: {} # stream this container's output into the `devspace dev` terminal (default options)
   frontend:
     labelSelector: { app: frontend }
@@ -72,11 +99,11 @@ dev:
       - name: WATCHPACK_POLLING # file events from sync don't always reach the watcher
         value: "true"
       - name: ALLOWED_DEV_ORIGINS # let `next dev` serve its JS to the ingress host
-        value: app.devspace.test
+        value: ${APP_HOST}
     sync:
       - path: ./frontend:/app
         excludePaths: [node_modules/, .next/] # the image and next dev provide them
         startContainer: true
     ports:
-      - port: "3001:3000" # host 3000 is often taken; localhost:3001 -> pod:3000
+      - port: "${FRONTEND_LOCAL_PORT}:3000" # host 3000 is often taken; default localhost:3001 -> pod:3000
     logs: {} # stream this container's output into the `devspace dev` terminal (default options)
