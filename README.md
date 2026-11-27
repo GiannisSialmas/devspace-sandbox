@@ -77,9 +77,15 @@ page load:  browser ─► frontend (server component) ────────�
 button:     browser ─► frontend /api/* (route handler proxy) ───► backend Service
 ```
 
+Because the browser only uses relative URLs on its own origin, everything works the same
+through the ingress (`app.devspace.test:8081`) and the port-forward (`localhost:3001`).
+The proxy reads `BACKEND_URL` per request. Next's `rewrites` would fix it at build time
+in a production image.
+
 ## Prerequisites
 
 - Docker and k3d.
+- `app.devspace.test` resolving to `127.0.0.1`, see [Local DNS](#local-dns).
 - The DevSpace CLI, see [Install DevSpace](#install-devspace).
 
 ## Install DevSpace
@@ -101,6 +107,18 @@ Homebrew, Windows) are in the
 [DevSpace install docs](https://www.devspace.sh/docs/getting-started/installation).
 Uninstall with `rm ~/.local/bin/devspace`.
 
+## Local DNS
+
+The ingress uses the hostname `app.devspace.test`. `.test` is a reserved TLD (RFC 2606) meant
+for exactly this. Point it at your machine with one line in `/etc/hosts`:
+
+```sh
+echo '127.0.0.1 app.devspace.test' | sudo tee -a /etc/hosts
+```
+
+No DNS change at all? Send the Host header yourself:
+`curl -H 'Host: app.devspace.test' http://127.0.0.1:8081/`
+
 ## The k3d cluster
 
 [k3d](https://k3d.io) runs [k3s](https://k3s.io), a lightweight Kubernetes, as Docker
@@ -115,6 +133,17 @@ node count, pinned k3s version (v1.31.1), ports and the image registry.
 | `k3d-devspace-sandbox-agent-0` | Worker node, runs pods. |
 | `k3d-devspace-sandbox-serverlb` | Load balancer, the cluster's front door: `127.0.0.1:6444` → Kubernetes API, `:8081` → ingress (HTTP). |
 | `devspace-sandbox-registry.localhost` | Image registry, `127.0.0.1:5111` on the host → `5000` in the container. |
+
+### Ingress
+
+k3s ships [Traefik](https://traefik.io) as its ingress controller. The Ingress (the `ingress`
+deployment in `devspace.yaml`) sends everything on the host `app.devspace.test`
+to the frontend. The backend has no
+ingress rule, so it isn't exposed outside the cluster (apart from the DevSpace port-forward).
+
+```
+browser → :8081 → serverlb → Traefik → frontend Service (3000) → backend Service (4000)
+```
 
 ### Images
 
@@ -152,6 +181,8 @@ Then open:
 
 | URL | What |
 |---|---|
+| http://app.devspace.test:8081 | App through the k3d load balancer + Traefik ingress |
+| http://app.devspace.test:8081/api/hello | Backend, through the ingress and the Next.js proxy |
 | http://localhost:3001 | Frontend, DevSpace port-forward |
 | http://localhost:4000/api/hello | Backend directly, DevSpace port-forward |
 
@@ -185,3 +216,6 @@ k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
   right away and `node --watch` restarts on the first synced change.
 - **The visit counter is in memory** on purpose: it resets on every hot reload, so you can
   see reloads happen. A real app would keep it in a backing service (Redis, Postgres).
+- **`allowedDevOrigins` for `next dev`.** Next.js dev mode only serves its JS to `localhost`.
+  Through the ingress host the page rendered but never hydrated, so the button did nothing.
+  `ALLOWED_DEV_ORIGINS=app.devspace.test` (set in `devspace.yaml`) feeds `next.config.mjs`.
