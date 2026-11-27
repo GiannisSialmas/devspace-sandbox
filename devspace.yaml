@@ -59,9 +59,16 @@ images:
     dockerfile: ./frontend/Dockerfile
     target: dev
 
-# Plain manifests. DevSpace swaps image refs that match images: above for the freshly built tags.
+# Two deployment types side by side. In both, DevSpace swaps image refs that match images:
+# above for the freshly built tags.
 deployments:
-  app: # the backend and frontend Deployments and Services
+  backend: # a local Helm chart
+    helm:
+      chart:
+        name: ./charts/backend
+      values:
+        image: ${REGISTRY}/backend
+  frontend: # plain manifests: the frontend Deployment and Service
     kubectl:
       manifests:
         - k8s/
