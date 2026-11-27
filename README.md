@@ -43,7 +43,7 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Images and deployments
+devspace.yaml   Images, deployments, dev containers
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
 
@@ -145,13 +145,23 @@ Pause and resume without losing state: `k3d cluster stop devspace-sandbox` /
 
 ```sh
 k3d cluster create -c k3d/k3d-config.yaml          # cluster + registry on localhost:5111
-devspace deploy                                     # build, push, deploy
-kubectl port-forward svc/frontend 3001:3000         # then open http://localhost:3001
+devspace dev                                        # Ctrl+C to stop
 ```
+
+Then open:
+
+| URL | What |
+|---|---|
+| http://localhost:3001 | Frontend, DevSpace port-forward |
+| http://localhost:4000/api/hello | Backend directly, DevSpace port-forward |
+
+Edit anything in `frontend/app/` or `backend/server.js` and it reloads in the cluster within a
+second or two.
 
 ## Stop / clean up
 
 ```sh
+devspace reset pods                                 # swap the dev containers back to the built images
 devspace purge                                      # remove the app
 k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
 ```
@@ -165,5 +175,13 @@ k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
   entry mapping `localhost:5111` to the registry container instead (see `k3d/k3d-config.yaml`).
 - **`localRegistry: enabled: false`.** Otherwise DevSpace 6.3 spins up its own registry
   inside the cluster and builds there.
+- **Frontend dev image is a Dockerfile stage** (`target: dev`) with `node_modules` baked in.
+  Running `npm ci` inside the dev pod on every start was slow and hit flaky in-cluster DNS.
+- **Backend dev image is the built image itself** (`${runtime.images.backend.image}`), since
+  it already has the production deps. `/app` belongs to `node`, the user the container runs
+  as, so DevSpace's sync can write into it. Its sync has no `startContainer: true`: as a
+  non-root user, DevSpace's restart helper can't create its start file in the root-owned
+  `/.devspace`, so the app would wait forever. The image already has the code, so it starts
+  right away and `node --watch` restarts on the first synced change.
 - **The visit counter is in memory** on purpose: it resets on every hot reload, so you can
   see reloads happen. A real app would keep it in a backing service (Redis, Postgres).

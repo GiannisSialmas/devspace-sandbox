@@ -6,7 +6,7 @@ name: devspace-sandbox
 localRegistry:
   enabled: false
 
-# `devspace build` / the first step of `devspace deploy`
+# `devspace build` / the first step of `devspace deploy` and `devspace dev`
 images:
   backend:
     image: localhost:5111/backend
@@ -16,6 +16,11 @@ images:
     image: localhost:5111/frontend
     context: ./frontend
     dockerfile: ./frontend/Dockerfile
+  frontend-dev: # same Dockerfile, stopped at the `dev` stage (node_modules + next dev)
+    image: localhost:5111/frontend-dev
+    context: ./frontend
+    dockerfile: ./frontend/Dockerfile
+    target: dev
 
 # Plain manifests. DevSpace swaps image refs that match images: above for the freshly built tags.
 deployments:
@@ -23,3 +28,35 @@ deployments:
     kubectl:
       manifests:
         - k8s/
+
+# `devspace dev`: swap each container for a dev image, sync the source in, hot reload.
+dev:
+  backend:
+    labelSelector: { app: backend }
+    devImage: ${runtime.images.backend.image}:${runtime.images.backend.tag} # the built image, deps included
+    command: ["npm", "run", "dev"] # node --watch
+    env:
+      - name: NODE_ENV # the image sets production
+        value: development
+    sync:
+      - path: ./backend:/app
+        excludePaths: [node_modules/] # the image provides it
+        # no startContainer: the image already has the code, and as the non-root `node` user
+        # DevSpace's restart helper can't write its start file in the root-owned /.devspace
+    ports:
+      - port: "4000"
+    logs: {} # stream this container's output into the `devspace dev` terminal (default options)
+  frontend:
+    labelSelector: { app: frontend }
+    devImage: ${runtime.images.frontend-dev.image}:${runtime.images.frontend-dev.tag}
+    command: ["npm", "run", "dev"]
+    env:
+      - name: WATCHPACK_POLLING # file events from sync don't always reach the watcher
+        value: "true"
+    sync:
+      - path: ./frontend:/app
+        excludePaths: [node_modules/, .next/] # the image and next dev provide them
+        startContainer: true
+    ports:
+      - port: "3001:3000" # host 3000 is often taken; localhost:3001 -> pod:3000
+    logs: {} # stream this container's output into the `devspace dev` terminal (default options)

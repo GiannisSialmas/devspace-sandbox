@@ -3,6 +3,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Used by `devspace dev`: deps baked in, source synced over the top, hot reload.
+FROM deps AS dev
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY . .
+CMD ["npm", "run", "dev"]
+
 FROM node:24-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
