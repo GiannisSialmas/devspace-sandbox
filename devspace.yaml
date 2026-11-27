@@ -28,6 +28,24 @@ deployments:
     kubectl:
       manifests:
         - k8s/
+  ingress: # the Ingress, written inline
+    kubectl:
+      inlineManifest: |-
+        # Traefik (bundled with k3s) serves this on the k3d load balancer, port 8081.
+        # Only the frontend is exposed. Next.js proxies /api/* to the backend inside the cluster.
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: app
+        spec:
+          rules:
+            - host: app.devspace.test
+              http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service: { name: frontend, port: { number: 3000 } }
 
 # `devspace dev`: swap each container for a dev image, sync the source in, hot reload.
 dev:
@@ -53,6 +71,8 @@ dev:
     env:
       - name: WATCHPACK_POLLING # file events from sync don't always reach the watcher
         value: "true"
+      - name: ALLOWED_DEV_ORIGINS # let `next dev` serve its JS to the ingress host
+        value: app.devspace.test
     sync:
       - path: ./frontend:/app
         excludePaths: [node_modules/, .next/] # the image and next dev provide them
