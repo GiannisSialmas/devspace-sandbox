@@ -42,7 +42,8 @@ small sync helper is injected into dev containers).
 ```
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
-k8s/            Plain manifests: Deployments, Services
+charts/backend/ Helm chart for the backend: Deployment, Service
+k8s/            Plain manifests for the frontend: Deployment, Service
 devspace.yaml   Vars, images, deployments, dev containers, hooks, pipelines, commands, profiles
 pipelines/      Pipeline scripts, sourced from devspace.yaml
 scripts/        Helpers for `devspace run` commands
@@ -191,6 +192,29 @@ Then open:
 Edit anything in `frontend/app/` or `backend/server.js` and it reloads in the cluster within a
 second or two.
 
+## Deployments
+
+`deployments:` in `devspace.yaml` uses both of DevSpace's deployment types, one per service:
+
+| Deployment | Type | Source |
+|---|---|---|
+| `backend` | `helm` | Local chart [`charts/backend/`](charts/backend/). `devspace.yaml` passes `image` as a value |
+| `frontend` | `kubectl` | Plain manifests in [`k8s/`](k8s/): the frontend Deployment and Service |
+| `ingress` | `kubectl` | `inlineManifest`: the Ingress, written inside `devspace.yaml` so `${APP_HOST}` gets filled in. DevSpace doesn't replace vars in `k8s/` files |
+
+In both, DevSpace swaps image refs that match `images:` (here `localhost:5111/backend` in the
+Helm values, `localhost:5111/frontend` in the manifest) for the freshly built tags.
+
+Those are the only two types. Variants:
+
+- **`kubectl`**: `kustomize: true` deploys a kustomize folder; `inlineManifest` takes YAML
+  written inside `devspace.yaml`.
+- **`helm`**: the chart can be a local folder, a chart repo or OCI. With no `chart:` at all,
+  DevSpace uses its own generic "component chart", configured only through `values`.
+
+DevSpace downloads the `helm` binary into `~/.devspace/bin` the first time it needs it, like
+its own `kubectl`. The release shows up in `helm list` under the name `backend`.
+
 ## Variables
 
 `devspace.yaml` uses one variable of each kind. By default (`source: all`) DevSpace takes a
@@ -227,8 +251,8 @@ devspace reset vars       # forget cached answers, so questions are asked again
   [Commands](#commands). (`password: true` would hide the typing of a DevSpace question.)
 - **Non-interactive runs** (CI, scripts) can't answer questions: pass every value as an env var
   or `--var NAME=value`.
-- The vars are only wired into the dev containers (`dev.backend.env`). `k8s/` keeps static
-  values, so `devspace deploy` uses those.
+- The vars are only wired into the dev containers (`dev.backend.env`). `k8s/` and the backend
+  chart keep static values, so `devspace deploy` uses those.
 
 ## Commands
 
@@ -335,7 +359,7 @@ run_dependencies --all --pipeline purge
 | `run_dependencies` | Runs the same pipeline in other DevSpace projects under `dependencies:`. None here, so nothing |
 | `ensure_pull_secrets` | Creates image-pull secrets for registries that need a login. The local registry needs none |
 | `build_images` | Builds everything under `images:`, skipping unchanged images |
-| `create_deployments` | Deploys everything under `deployments:` (`kubectl apply` of `k8s/` and the inline Ingress) |
+| `create_deployments` | Deploys everything under `deployments:` (`backend` → Helm chart, `frontend` → `kubectl apply k8s/`) |
 | `start_dev` | Starts everything under `dev:`: swaps the pods, then sync, port-forwards, logs |
 | `stop_dev` / `purge_deployments` | Stops dev mode, then deletes what was deployed |
 
@@ -345,7 +369,7 @@ the others stay default. Custom pipelines run with `devspace run-pipeline <name>
 ### The `purge` override
 
 This repo overrides only `purge`, to also delete the admin password Secret. `purge_deployments`
-removes what's under `deployments:` (`k8s/` and the Ingress), but that Secret comes from `devspace run set-admin-token`.
+removes what's under `deployments:` (the chart and `k8s/`), but that Secret comes from `devspace run set-admin-token`.
 
 ```yaml
 pipelines:

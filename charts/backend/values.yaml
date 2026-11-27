@@ -1,0 +1,2 @@
+image: localhost:5111/backend # devspace.yaml passes this with the freshly built tag
+greeting: Hello from the backend, deployed by DevSpace
