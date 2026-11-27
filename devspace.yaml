@@ -1,0 +1,25 @@
+# Docs: https://www.devspace.sh/docs/configuration/reference
+version: v2beta1
+name: devspace-sandbox
+
+# Push to the k3d registry instead of DevSpace's own in-cluster registry.
+localRegistry:
+  enabled: false
+
+# `devspace build` / the first step of `devspace deploy`
+images:
+  backend:
+    image: localhost:5111/backend
+    context: ./backend
+    dockerfile: ./backend/Dockerfile
+  frontend:
+    image: localhost:5111/frontend
+    context: ./frontend
+    dockerfile: ./frontend/Dockerfile
+
+# Plain manifests. DevSpace swaps image refs that match images: above for the freshly built tags.
+deployments:
+  app: # the backend and frontend Deployments and Services
+    kubectl:
+      manifests:
+        - k8s/
