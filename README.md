@@ -46,6 +46,7 @@ charts/backend/ Helm chart for the backend: Deployment, Service
 k8s/            Plain manifests for the frontend: Deployment, Service
 devspace.yaml   Vars, images, deployments, dev containers, hooks, pipelines, commands, profiles
 pipelines/      Pipeline scripts, sourced from devspace.yaml
+.claude/skills/ Claude Code skill for running a copy per git worktree
 scripts/        Helpers for `devspace run` commands
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
@@ -121,6 +122,11 @@ echo '127.0.0.1 app.devspace.test' | sudo tee -a /etc/hosts
 
 No DNS change at all? Send the Host header yourself:
 `curl -H 'Host: app.devspace.test' http://127.0.0.1:8081/`
+
+Every extra copy (see [Worktrees](#worktrees)) has its own host, `<name>.devspace.test`, and
+needs its own line, added by hand: `/etc/hosts` has no wildcards. In a cloud cluster,
+[ExternalDNS](https://github.com/kubernetes-sigs/external-dns) fills this gap by creating a
+DNS record for each Ingress host.
 
 ## The k3d cluster
 
@@ -404,6 +410,27 @@ A profile can change the config in three ways:
 | `replace` | Replaces whole top-level sections |
 
 `activation` can also turn a profile on automatically, for example when an env var is set.
+
+## Worktrees
+
+Several copies of the app can run on the one cluster at once, for example one per git
+worktree, each worked on by a different agent. Each copy needs its own namespace, Ingress host
+and local ports; the cluster, registry and images are shared.
+
+```sh
+git worktree add ../devspace-sandbox-feat-x -b feat-x
+cd ../devspace-sandbox-feat-x
+APP_HOST=feat-x.devspace.test FRONTEND_LOCAL_PORT=3101 BACKEND_LOCAL_PORT=4101 \
+  devspace dev -n sandbox-feat-x
+```
+
+- Pass `-n` on every run instead of `devspace use namespace`, which changes the kube context
+  all checkouts share. For `devspace run`, the flag goes before `run`.
+- With no terminal attached (an agent), question vars like `GREETING` take their default.
+- Tear down: `devspace purge -n sandbox-feat-x`, delete the namespace, `git worktree remove`.
+
+The Claude Code skill [`.claude/skills/devspace-worktree`](.claude/skills/devspace-worktree/SKILL.md)
+walks an agent through all of this, including picking free ports.
 
 ## Stop / clean up
 
