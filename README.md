@@ -43,7 +43,8 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Vars, images, deployments, dev containers, hooks
+devspace.yaml   Vars, images, deployments, dev containers, hooks, commands
+scripts/        Helpers for `devspace run` commands
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
 
@@ -57,7 +58,7 @@ Two services, both configured through env vars and logging to stdout.
 |---|---|
 | `GET /api/hello` | Greeting (`GREETING`), version (`APP_VERSION`), pod name, Node version, start time, visit count |
 | `POST /api/visits` | Bumps the visit counter (in memory, so it resets on restart) |
-| `POST /api/visits/reset` | Resets the counter. No authentication by default. With `ADMIN_TOKEN` set, it needs `Authorization: Bearer <token>` |
+| `POST /api/visits/reset` | Resets the counter. No authentication by default. Once an admin password is set (`backend-admin` Secret → `ADMIN_TOKEN` env), it needs `Authorization: Bearer <password>` |
 | `GET /api/health` | `{"status":"ok"}`, used by the readiness probe |
 
 **Frontend** ([`frontend/app/`](frontend/app/)): Next.js 16 (App Router) on port `3000`.
@@ -203,7 +204,8 @@ value from your environment first and only asks if it isn't set, so
 | `FRONTEND_LOCAL_PORT` | `source: env` + `default` | Local port of the frontend port-forward (default `3001`). Never asked: `FRONTEND_LOCAL_PORT=3005 devspace dev` |
 | `BACKEND_LOCAL_PORT` | `source: env` + `default` | Same for the backend (`4000`) |
 | `APP_HOST` | `source: env` + `default` | Ingress host (default `app.devspace.test`); also fed to `ALLOWED_DEV_ORIGINS` |
-| `APP_URL` | static value, built from a var | `http://${APP_HOST}:8081`, used by the hooks |
+| `HOSTS_ENTRY` | `command` | Checks `/etc/hosts` for `APP_HOST`, used by `devspace run doctor` |
+| `APP_URL` | static value, built from a var | `http://${APP_HOST}:8081`, used by hooks and commands |
 
 ```sh
 devspace list vars        # current values (cached answers included)
@@ -212,10 +214,47 @@ devspace reset vars       # forget cached answers, so questions are asked again
 
 - **Cache:** question answers are stored encrypted in `.devspace/cache.yaml` (gitignored).
   `noCache` vars are never stored.
+- **`alwaysResolve`:** in v6.3.21 every var is resolved on every run unless it sets
+  `alwaysResolve: false`. Then it's resolved only when the run uses it. Leaving it unset counts
+  as `true`, though the docs say the default is `false`; that's what the source code does
+  (verified with `devspace print`). `GREETING` sets `false`, so `devspace run <command>` (which
+  only loads `commands:`) doesn't ask for it.
+- **A question var can't be limited to one command.** `dev`, `deploy`, `build` and `purge` load
+  the whole file and resolve every `${VAR}` used anywhere in it, `commands:` included. A var
+  asked on every run (`noCache`) would therefore prompt on `devspace purge` too. That's why the
+  admin token isn't a DevSpace var: `set-admin-token` prompts for it itself, see
+  [Commands](#commands). (`password: true` would hide the typing of a DevSpace question.)
 - **Non-interactive runs** (CI, scripts) can't answer questions: pass every value as an env var
   or `--var NAME=value`.
 - The vars are only wired into the dev containers (`dev.backend.env`). `k8s/` keeps static
   values, so `devspace deploy` uses those.
+
+## Commands
+
+Shortcuts under `commands:` in `devspace.yaml`, run with `devspace run <name>`. `devspace list
+commands` shows them with their descriptions, grouped by `section`.
+
+| Command | What it does |
+|---|---|
+| `open` | Prints the app URL |
+| `doctor` | Checks the `/etc/hosts` entry, the k3d cluster, the registry and the ingress ([`scripts/doctor.sh`](scripts/doctor.sh)) |
+| `logs <backend\|frontend>` | Follows that service's logs (`devspace logs -f -l app=...`) |
+| `shell <backend\|frontend>` | Opens a shell in that service's pod (`devspace enter -l app=...`) |
+| `set-admin-token` | Prompts for an admin password (hidden; or `ADMIN_TOKEN=... devspace run set-admin-token`), stores it in the `backend-admin` Secret and restarts the backend. Empty removes it, so reset is open again ([`scripts/set-admin-token.sh`](scripts/set-admin-token.sh)) |
+| `reset-visits` | Resets the visit counter through the ingress. No password set: just resets. Password set: asks for it (hidden; or `ADMIN_TOKEN=...`). It only checks whether the Secret exists and never reads the password itself ([`scripts/reset-visits.sh`](scripts/reset-visits.sh)) |
+
+How the fields work:
+
+- `command`: a shell script. Arguments after the name are `$1`, `$2`, ... Write `$1`, not
+  `${1}`: DevSpace reads `${...}` as one of its own vars.
+- `description` and `section`: only for `devspace list commands`.
+- `after`: runs after the command, even when it fails. `$COMMAND_ERROR` holds the error;
+  `reset-visits` uses it to print a hint.
+- Not used here: `appendArgs` (add the CLI arguments to the end of `command`), `args` (run
+  without a shell), `internal` (hidden, only callable from pipelines).
+
+Commands work without `devspace dev` running: the dev pods keep running `next dev` /
+`node --watch` on their own. Only sync, port-forwards and log streaming stop with it.
 
 ## Hooks
 
@@ -225,7 +264,7 @@ Scripts under `hooks:` in `devspace.yaml` that DevSpace runs on events in its no
 | Hook | Event | What it does |
 |---|---|---|
 | `preflight-registry` | `before:build` | Stops early with a clear message if the registry on `localhost:5111` is down |
-| `failure-hint` | `error:build:*`, `error:deploy:*` | Prints a hint when a build or deploy fails |
+| `failure-hint` | `error:build:*`, `error:deploy:*` | Prints `Try: devspace run doctor` when a build or deploy fails |
 | `backend-smoke-test` | `after:initialSync:backend` | Runs inside the backend pod and waits until `/api/health` answers |
 | `ready-banner` | `after:initialSync:frontend` | Prints `Ready: http://app.devspace.test:8081` |
 
