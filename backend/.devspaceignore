@@ -1,0 +1,6 @@
+# Kept out of `devspace dev` sync (gitignore syntax). Read via `excludeFile:` in devspace.yaml;
+# DevSpace doesn't pick up this file by name on its own.
+.env*
+*.log
+coverage/
+.DS_Store

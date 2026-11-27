@@ -430,6 +430,11 @@ k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
   non-root user, DevSpace's restart helper can't create its start file in the root-owned
   `/.devspace`, so the app would wait forever. The image already has the code, so it starts
   right away and `node --watch` restarts on the first synced change.
+- **Sync excludes come from two places.** Inline `excludePaths` in `devspace.yaml` for what
+  must never sync (`node_modules/`, `.next/`: the image and `next dev` provide them), and
+  `excludeFile: .devspaceignore` for local clutter (`.env*`, logs, coverage). DevSpace has no
+  built-in `.devspaceignore`: the name is this repo's convention, and the path is relative to
+  the synced folder (`backend/.devspaceignore`), not to `devspace.yaml`.
 - **The visit counter is in memory** on purpose: it resets on every hot reload, so you can
   see reloads happen. A real app would keep it in a backing service (Redis, Postgres).
 - **`allowedDevOrigins` for `next dev`.** Next.js dev mode only serves its JS to `localhost`.

@@ -106,7 +106,8 @@ dev:
         value: ${APP_VERSION}
     sync:
       - path: ./backend:/app
-        excludePaths: [node_modules/] # the image provides it
+        excludePaths: [node_modules/] # inline: must never sync, the image provides it
+        excludeFile: .devspaceignore # relative to the synced folder; local clutter (.env, logs, ...)
         # no startContainer: the image already has the code, and as the non-root `node` user
         # DevSpace's restart helper can't write its start file in the root-owned /.devspace
     ports:
@@ -123,7 +124,8 @@ dev:
         value: ${APP_HOST}
     sync:
       - path: ./frontend:/app
-        excludePaths: [node_modules/, .next/] # the image and next dev provide them
+        excludePaths: [node_modules/, .next/] # inline: must never sync, the image and next dev provide them
+        excludeFile: .devspaceignore # relative to the synced folder; local clutter (.env, logs, ...)
         startContainer: true
     ports:
       - port: "${FRONTEND_LOCAL_PORT}:3000" # host 3000 is often taken; default localhost:3001 -> pod:3000
