@@ -25,6 +25,8 @@ vars:
     source: env
     default: app.devspace.test
 
+  APP_URL: http://${APP_HOST}:8081 # used by the hooks
+
 # Push to the k3d registry instead of DevSpace's own in-cluster registry.
 localRegistry:
   enabled: false
@@ -107,3 +109,29 @@ dev:
     ports:
       - port: "${FRONTEND_LOCAL_PORT}:3000" # host 3000 is often taken; default localhost:3001 -> pod:3000
     logs: {} # stream this container's output into the `devspace dev` terminal (default options)
+
+# Hooks: scripts DevSpace runs on events in its normal flow (build, deploy, sync, errors, ...).
+# Events: before:|after:|error: + build|deploy|purge|initialSync|createPullSecrets|...,
+# optionally narrowed by name (after:deploy:backend, after:initialSync:backend), plus
+# start:|stop:|restart:|error: + sync|portForwarding. No `container` = runs locally.
+hooks:
+  - name: preflight-registry # fail fast with a clear message instead of a push error
+    events: ["before:build"]
+    command: 'curl -fs http://localhost:5111/v2/ >/dev/null 2>&1 || { echo "registry on localhost:5111 is down (is the k3d cluster running?)"; exit 1; }'
+    # not `silent: true`: in v6.3.21 that also hides the output when the hook fails
+
+  - name: failure-hint
+    events: ["error:build:*", "error:deploy:*"] # per-image/deployment events need :<name> or :*
+    command: 'echo "Something failed. Is the k3d cluster running? (k3d cluster list)"'
+
+  - name: backend-smoke-test # runs inside the backend pod; DevSpace waits for the container first
+    events: ["after:initialSync:backend"]
+    container:
+      labelSelector: { app: backend }
+    command: |
+      for i in $(seq 30); do wget -qO- http://localhost:4000/api/health && echo && exit 0; sleep 1; done
+      echo "backend never became healthy"; exit 1
+
+  - name: ready-banner
+    events: ["after:initialSync:frontend"]
+    command: 'echo "Ready: ${APP_URL}"'
