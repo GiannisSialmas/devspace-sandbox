@@ -43,7 +43,7 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Vars, images, deployments, dev containers, hooks, pipelines, commands
+devspace.yaml   Vars, images, deployments, dev containers, hooks, pipelines, commands, profiles
 pipelines/      Pipeline scripts, sourced from devspace.yaml
 scripts/        Helpers for `devspace run` commands
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
@@ -203,7 +203,7 @@ value from your environment first and only asks if it isn't set, so
 | `GREETING` | `question` + `default` | Backend greeting in dev mode. Asked once, then cached |
 | `APP_VERSION` | `command` | `git rev-parse --short HEAD`, run every time, shown on the page |
 | `FRONTEND_LOCAL_PORT` | `source: env` + `default` | Local port of the frontend port-forward (default `3001`). Never asked: `FRONTEND_LOCAL_PORT=3005 devspace dev` |
-| `BACKEND_LOCAL_PORT` | `source: env` + `default` | Same for the backend (`4000`) |
+| `BACKEND_LOCAL_PORT`, `DEBUG_LOCAL_PORT` | `source: env` + `default` | Same for the backend (`4000`) and the debug profile's inspector (`9229`) |
 | `APP_HOST` | `source: env` + `default` | Ingress host (default `app.devspace.test`); also fed to `ALLOWED_DEV_ORIGINS` |
 | `HOSTS_ENTRY` | `command` | Checks `/etc/hosts` for `APP_HOST`, used by `devspace run doctor` |
 | `APP_URL` | static value, built from a var | `http://${APP_HOST}:8081`, used by hooks and commands |
@@ -356,6 +356,30 @@ pipelines:
 [`pipelines/purge.sh`](pipelines/purge.sh) is the default purge plus one `kubectl delete secret`.
 `source` runs it inside DevSpace's pipeline shell, so `stop_dev` and the other functions work.
 DevSpace doesn't fill in `${VAR}` in a sourced file, so it uses env vars like `$DEVSPACE_NAMESPACE`.
+
+## Profiles
+
+A profile is a named set of changes to `devspace.yaml`, turned on with `-p <name>`. Without
+`-p`, nothing changes.
+
+| Profile | What it changes |
+|---|---|
+| `debug` | Runs the backend with `node --inspect` and forwards the inspector to `localhost:9229` |
+
+```sh
+devspace dev -p debug        # then attach VS Code ("Attach to Node", port 9229) or chrome://inspect
+devspace print -p debug      # show the config with the profile applied
+```
+
+A profile can change the config in three ways:
+
+| Field | How |
+|---|---|
+| `patches` | Precise edits: `op: replace / add / remove` at a `path` (used here; `add` on a list appends) |
+| `merge` | Deep-merges a YAML block on top of the config |
+| `replace` | Replaces whole top-level sections |
+
+`activation` can also turn a profile on automatically, for example when an env var is set.
 
 ## Stop / clean up
 
