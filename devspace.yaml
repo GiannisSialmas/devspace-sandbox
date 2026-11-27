@@ -145,6 +145,20 @@ hooks:
     events: ["after:initialSync:frontend"]
     command: 'echo "Ready: ${APP_URL}"'
 
+# Pipelines vs commands: both are shell scripts, but only pipelines get DevSpace's functions
+# (build_images, create_deployments, start_dev, wait_pod, ...). Rule of thumb: if it builds,
+# deploys or starts dev mode, it's a pipeline; anything else is a command.
+#
+# pipelines: `devspace dev|deploy|build|purge` each run the pipeline of the same name, and
+# `devspace run-pipeline <name>` runs a custom one. Only `purge` is overridden here; the others
+# use the built-in defaults. The default `dev` is roughly:
+#   run_dependencies --all; ensure_pull_secrets --all; build_images --all
+#   create_deployments --all; start_dev --all
+# Defining `pipelines: dev:` replaces that default.
+pipelines:
+  purge:
+    run: source ./pipelines/purge.sh # the script lives in its own file
+
 # commands: shortcuts run with `devspace run <name>`, like `scripts` in package.json. Plain
 # shell with vars filled in; to build or deploy they'd have to call `devspace` themselves.
 commands:
