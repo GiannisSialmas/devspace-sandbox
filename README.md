@@ -43,7 +43,8 @@ small sync helper is injected into dev containers).
 backend/        Express API (/api/hello, /api/visits, /api/visits/reset, /api/health)
 frontend/       Next.js 16 (App Router). Server-renders data from the backend over the in-cluster Service
 k8s/            Plain manifests: Deployments, Services
-devspace.yaml   Vars, images, deployments, dev containers, hooks, commands
+devspace.yaml   Vars, images, deployments, dev containers, hooks, pipelines, commands
+pipelines/      Pipeline scripts, sourced from devspace.yaml
 scripts/        Helpers for `devspace run` commands
 k3d/            k3d cluster config: 1 server, 1 agent, local image registry
 ```
@@ -297,11 +298,70 @@ Scripts under `hooks:` in `devspace.yaml` that DevSpace runs on events in its no
 | `container.pod`, `imageSelector`, `containerName`, `namespace` | Other ways to pick the container |
 | `container.timeout` / `container.wait` | How long to wait for the container (default 150 s), or don't wait at all |
 
+**Hooks vs pipelines:** hooks hang extra steps on the default flow. A pipeline replaces the
+flow itself, and could run the same steps explicitly.
+
+## Pipelines
+
+`devspace dev`, `deploy`, `build` and `purge` each run a pipeline of the same name. Without a
+`pipelines:` entry, DevSpace uses its built-in defaults (from the v6.3.21 source):
+
+```sh
+# devspace dev
+run_dependencies --all
+ensure_pull_secrets --all
+build_images --all
+create_deployments --all
+start_dev --all
+
+# devspace deploy: same as dev, without start_dev
+run_dependencies --all
+ensure_pull_secrets --all
+build_images --all
+create_deployments --all
+
+# devspace build
+run_dependencies --all --pipeline build
+build_images --all
+
+# devspace purge: the reverse order
+stop_dev --all
+purge_deployments --all
+run_dependencies --all --pipeline purge
+```
+
+| Step | What it does here |
+|---|---|
+| `run_dependencies` | Runs the same pipeline in other DevSpace projects under `dependencies:`. None here, so nothing |
+| `ensure_pull_secrets` | Creates image-pull secrets for registries that need a login. The local registry needs none |
+| `build_images` | Builds everything under `images:`, skipping unchanged images |
+| `create_deployments` | Deploys everything under `deployments:` (`kubectl apply` of `k8s/` and the inline Ingress) |
+| `start_dev` | Starts everything under `dev:`: swaps the pods, then sync, port-forwards, logs |
+| `stop_dev` / `purge_deployments` | Stops dev mode, then deletes what was deployed |
+
+Defining `pipelines: dev:` with a `run:` script replaces the default for `devspace dev` only;
+the others stay default. Custom pipelines run with `devspace run-pipeline <name>`.
+
+### The `purge` override
+
+This repo overrides only `purge`, to also delete the admin password Secret. `purge_deployments`
+removes what's under `deployments:` (`k8s/` and the Ingress), but that Secret comes from `devspace run set-admin-token`.
+
+```yaml
+pipelines:
+  purge:
+    run: source ./pipelines/purge.sh
+```
+
+[`pipelines/purge.sh`](pipelines/purge.sh) is the default purge plus one `kubectl delete secret`.
+`source` runs it inside DevSpace's pipeline shell, so `stop_dev` and the other functions work.
+DevSpace doesn't fill in `${VAR}` in a sourced file, so it uses env vars like `$DEVSPACE_NAMESPACE`.
+
 ## Stop / clean up
 
 ```sh
 devspace reset pods                                 # swap the dev containers back to the built images
-devspace purge                                      # remove the app
+devspace purge                                      # remove the app (and the admin password)
 k3d cluster delete -c k3d/k3d-config.yaml           # remove cluster + registry
 ```
 
