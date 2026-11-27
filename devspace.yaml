@@ -22,6 +22,9 @@ vars:
   BACKEND_LOCAL_PORT:
     source: env
     default: "4000"
+  DEBUG_LOCAL_PORT: # used by the debug profile
+    source: env
+    default: "9229"
   APP_HOST: # the Ingress host; needs a line in /etc/hosts
     source: env
     default: app.devspace.test
@@ -195,3 +198,16 @@ commands:
     description: Reset the visit counter; asks for the admin password only if one is set
     command: ./scripts/reset-visits.sh ${DEVSPACE_NAMESPACE} ${APP_URL}
     after: '[ -n "$COMMAND_ERROR" ] && echo "reset failed: wrong admin password, or the app is unreachable (try: devspace run doctor)" || true'
+
+# Profiles: named changes to this file, turned on with `-p <name>` (e.g. `devspace dev -p debug`).
+# `devspace print -p <name>` shows the resulting config.
+profiles:
+  - name: debug
+    description: Backend with the Node inspector, forwarded to localhost:9229 (DEBUG_LOCAL_PORT)
+    patches:
+      - op: replace
+        path: dev.backend.command
+        value: ["node", "--inspect=0.0.0.0:9229", "--watch", "server.js"]
+      - op: add # on a list, add appends
+        path: dev.backend.ports
+        value: { port: "${DEBUG_LOCAL_PORT}:9229" }
